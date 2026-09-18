@@ -1,0 +1,28 @@
+# Local development override — test WITHOUT OIDC and WITHOUT Cloudflare.
+#
+# This file is NOT auto-loaded. Apply it explicitly:
+#
+#   make dev                 # start the dev stack
+#   make dev-smoke           # hit local (:4000) + external (:4001)
+#   make dev-down            # stop it
+#
+# or manually:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# What it changes vs the base stack:
+#   - cloudflared is disabled (moved to the "disabled" profile, so it does not start)
+#   - litellm-external is exposed on host port 4001 and runs the no-OIDC config
+#     (config.local.yaml) so you can call it directly with no Access headers
+#
+# Dev endpoints:
+#   local:    http://127.0.0.1:4000/v1
+#   external: http://127.0.0.1:4001/v1   (no OIDC in dev)
+services:
+  cloudflared:
+    profiles: ["disabled"]
+
+  litellm-external:
+    ports:
+      - "127.0.0.1:4001:4000"
+    volumes:
+      - ./config.local.yaml:/app/config.yaml

@@ -1,0 +1,56 @@
+# LiteLLM config — LOCAL cluster mode (unauthenticated / no SSO)
+#
+# This instance is reachable only from the AI-cluster network. It has no OIDC;
+# callers identify themselves with a simple per-host virtual key (created via
+# the admin UI or /key/generate) so usage is attributed per user.
+#
+# NOTE: keep `model_list` in sync with config.external.yaml.
+
+model_list:
+  # --- Cloud APIs ---
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20240620
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: gemini-1.5-pro
+    litellm_params:
+      model: gemini/gemini-1.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  # --- NVIDIA GPU (vLLM) ---
+  - model_name: llama3-70b
+    litellm_params:
+      model: openai/meta-llama/Llama-3-70b-instruct
+      api_base: http://192.168.1.100:8000/v1 # Replace with your vLLM IP
+      api_key: "sk-optional"
+
+  # --- Mac Silicon (MLX) ---
+  - model_name: mistral-nemo
+    litellm_params:
+      model: openai/mistral-nemo-instruct
+      api_base: http://192.168.1.101:8080/v1 # Replace with your MLX Mac IP
+      api_key: "sk-optional"
+
+  # --- Mac/NVIDIA (Ollama) ---
+  - model_name: phi3-local
+    litellm_params:
+      model: ollama/phi3
+      api_base: http://192.168.1.102:11434 # Replace with your Ollama IP
+      api_key: "sk-optional"
+
+  # --- Qwen 3.8 (Ollama) ---
+  - model_name: qwen3.8
+    litellm_params:
+      model: ollama/qwen3.8
+      api_base: http://100.81.43.100:11434
+      api_key: "sk-optional"
+
+general_settings:
+  # Admin key for the UI and key management. LLM calls use per-host virtual keys.
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Restrict the admin UI to admins (external users use the OIDC instance).
+  ui_access_mode: admin_only

@@ -1,0 +1,125 @@
+# Two LiteLLM instances share one PostgreSQL database so per-user usage is
+# unified in a single dashboard:
+#   - litellm-local:    unauthenticated (no SSO), reachable only from the
+#                       cluster network, attributed via per-host virtual keys.
+#   - litellm-external: OIDC (Google) via Cloudflare Access, exposed only
+#                       through the Cloudflare Tunnel, attributed via the
+#                       authenticated identity header.
+#
+# The unauthenticated instance is NEVER published to the public internet.
+
+services:
+  litellm-local:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-local
+    restart: unless-stopped
+    # Bind to the cluster interface only. Set LOCAL_BIND_IP to the cluster NIC
+    # IP (e.g. 192.168.1.50) and add a host firewall rule so only the cluster
+    # subnet can reach port 4000. Do NOT leave this on 0.0.0.0 in production.
+    ports:
+      - "${LOCAL_BIND_IP:-0.0.0.0}:4000:4000"
+    volumes:
+      - ./config.local.yaml:/app/config.yaml
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://litellm:${POSTGRES_PASSWORD:-litellm_pass}@postgres:5432/litellm
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    command:
+      - "--config"
+      - "/app/config.yaml"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - litellm-net
+
+  litellm-external:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-external
+    restart: unless-stopped
+    # No host ports: reachable only via the Cloudflare Tunnel (and cluster net).
+    volumes:
+      - ./config.external.yaml:/app/config.yaml
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://litellm:${POSTGRES_PASSWORD:-litellm_pass}@postgres:5432/litellm
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    command:
+      - "--config"
+      - "/app/config.yaml"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - litellm-net
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    # Named (fixed) tunnel. Create it in Zero Trust -> Networks -> Tunnels,
+    # add a public hostname whose service is `http://litellm-external:4000`,
+    # and enable an Access policy (Google OIDC) on that hostname.
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - litellm-external
+    networks:
+      - litellm-net
+
+  postgres:
+    image: postgres:15
+    container_name: litellm-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=litellm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-litellm_pass}
+      - POSTGRES_DB=litellm
+    # Not published to the host: internal network only.
+    volumes:
+      - litellm_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - litellm-net
+
+  redis:
+    image: redis:7
+    container_name: litellm-redis
+    restart: unless-stopped
+    # Shared by both LiteLLM instances for cross-worker rate limits, budgets,
+    # router state, and cache invalidation. Not published to the host.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - litellm-net
+
+networks:
+  litellm-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
+
+volumes:
+  litellm_data:
+  redis_data:
